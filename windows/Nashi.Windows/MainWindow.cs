@@ -275,7 +275,7 @@ public sealed partial class MainWindow:Window
     }
     private async Task RunAsync(Func<string,IProgress<OperationProgress>,CancellationToken,Task<IReadOnlyList<string>>> work,string label="Fresh copy")
     {
-        var source=runSource;runSource=null;if(busy)return;var owner=webWindow?.IsActive==true?webWindow:this;string destination;
+        var source=runSource;runSource=null;if(busy)return;var owner=source is null&&webWindow?.IsActive==true?webWindow:this;string destination;
         if(label=="Move"||preferences.Value.OutputMode=="ask"||(files.Count==0&&source is null&&owner==this)){SetBusy(true);var folder=new OpenFolderDialog{Title=L10n.Text("Save new files to…"),InitialDirectory=Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)};if(folder.ShowDialog(owner)!=true){SetBusy(false);return;}destination=folder.FolderName;}
         else destination=owner==webWindow?preferences.Value.DownloadFolder:preferences.Value.OutputMode=="folder"&&!string.IsNullOrWhiteSpace(preferences.Value.OutputFolder)?preferences.Value.OutputFolder:Path.GetDirectoryName(source??files[0])!;
         SetBusy(true);using var cancellation=new CancellationTokenSource();var toast=new ToastWindow(owner,cancellation.Cancel);toast.Show();
