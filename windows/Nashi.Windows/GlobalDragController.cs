@@ -55,14 +55,15 @@ public sealed class GlobalDragController:IDisposable
     }
     private void ResetScroll(){currentKind=null;scrollAccumulator=0;dragRevealed=false;}
     /// Mouse wheel during a file drag cycles Tools -> Convert -> File actions without modifier keys.
-    /// Only wheel events are acted on; the hook never reads keystrokes.
+    /// Only wheel events are acted on; the hook never reads keystrokes. A wheel event is consumed only after
+    /// the drop wheel has verified a real file or link payload, so text selections and other drags keep scrolling.
     private IntPtr MouseHook(int code,IntPtr message,IntPtr data)
     {
-        if(code>=0&&message.ToInt32()==0x020A&&down&&preferences.Value.Enabled&&OwnerAvailable&&(currentKind is null||dragRevealed||wheel is {Revealed:true}))
+        if(code>=0&&message.ToInt32()==0x020A&&down&&preferences.Value.Enabled&&OwnerAvailable)
         {
             var info=Marshal.PtrToStructure<MouseHookData>(data);
             if(Math.Abs(info.Point.X-start.X)+Math.Abs(info.Point.Y-start.Y)>=10&&PrimaryMouseButton.IsPressed&&!InMoveSize())
-            {var delta=(int)(short)(info.MouseData>>16);var point=info.Point;owner.Dispatcher.BeginInvoke(()=>ScrollWheel(delta,point));return (IntPtr)1;}
+            {var verified=dragRevealed||wheel is {Revealed:true};if(verified||currentKind is null){var delta=(int)(short)(info.MouseData>>16);var point=info.Point;owner.Dispatcher.BeginInvoke(()=>ScrollWheel(delta,point));}if(verified)return (IntPtr)1;}
         }
         return CallNextHookEx(mouseHook,code,message,data);
     }
