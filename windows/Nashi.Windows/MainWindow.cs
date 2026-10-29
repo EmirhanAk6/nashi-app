@@ -233,14 +233,14 @@ public sealed partial class MainWindow:Window
     }
     private async Task EditAsync(ToolChoice choice)
     {
-        if(busy||files.Count==0)return;string? temporary=null;try
+        if(busy||files.Count==0)return;string? temporary=null;var ownsBusy=false;try
         {
             var requestedFormat=choice.Id.StartsWith("convert:",StringComparison.Ordinal)?choice.Id[8..]:null;if(requestedFormat is not null)choice=new("convert","Convert to "+requestedFormat.ToUpperInvariant(),"↗");
             choice=choice with{Id=choice.Id switch{"cropImage"=>"crop","annotateImage"=>"annotate","mergePDF"=>"mergePDFs",_=>choice.Id}};
-            SetBusy(true);var imageSelection=Images;var mediaSelection=Video||Audio;var selected=files.ToArray();MediaInfo? info=null;BitmapSource? preview=null;var input=selected[0];
-            if(choice.Id=="removeMetadata"){SetBusy(false);await EditMetadataAsync(selected);return;}
-            if(choice.Id=="readQRCode"){SetBusy(false);await ReadQrAsync(selected);return;}
-            if(!imageSelection&&!mediaSelection&&choice.Id is not ("extractArchive" or "unzip")){SetBusy(false);await EditDocumentAsync(choice,selected,requestedFormat);return;}
+            SetBusy(true);ownsBusy=true;var imageSelection=Images;var mediaSelection=Video||Audio;var selected=files.ToArray();MediaInfo? info=null;BitmapSource? preview=null;var input=selected[0];
+            if(choice.Id=="removeMetadata"){SetBusy(false);ownsBusy=false;await EditMetadataAsync(selected);return;}
+            if(choice.Id=="readQRCode"){SetBusy(false);ownsBusy=false;await ReadQrAsync(selected);return;}
+            if(!imageSelection&&!mediaSelection&&choice.Id is not ("extractArchive" or "unzip")){SetBusy(false);ownsBusy=false;await EditDocumentAsync(choice,selected,requestedFormat);return;}
             if(imageSelection)preview=ImageEngine.Load(input);
             else if(mediaSelection)
             {
@@ -252,7 +252,7 @@ public sealed partial class MainWindow:Window
                     await ProcessRunner.RunAsync(tools.Executable("ffmpeg"),["-v","error","-i",input,"-frames:v","1",temporary]);preview=ImageEngine.Load(temporary);
                 }
             }
-            SetBusy(false);var editor=new ToolEditor(this,choice.Id,choice.Title,input,info,preview,selected,choice.Id=="convert"?FeatureCatalog.Formats(selected):null);editor.ConfigureProfiles(preferences,requestedFormat);editor.ConfigureMediaRuntime(tools);var accepted=await ShowEditorAsync(editor);if(temporary is not null)File.Delete(temporary);if(!accepted)return;if(!files.SequenceEqual(selected)){files.Clear();Add(selected);}while(busy)await Task.Delay(250);
+            SetBusy(false);ownsBusy=false;var editor=new ToolEditor(this,choice.Id,choice.Title,input,info,preview,selected,choice.Id=="convert"?FeatureCatalog.Formats(selected):null);editor.ConfigureProfiles(preferences,requestedFormat);editor.ConfigureMediaRuntime(tools);var accepted=await ShowEditorAsync(editor);if(temporary is not null)File.Delete(temporary);if(!accepted)return;while(busy)await Task.Delay(250);if(!files.SequenceEqual(selected)){files.Clear();Add(selected);}
             var inputs=choice.Id is "cropVideo" or "redactVideo" or "annotate"?new[]{input}:editor.OrderedInputs;
             if(imageSelection)await RunAsync(async(destination,p,t)=>
             {
@@ -268,7 +268,7 @@ public sealed partial class MainWindow:Window
             else await RunAsync((destination,p,t)=>Task.Run(()=>DocumentEngine.Pdf(choice.Id,inputs,destination,editor.Pages,t),t),choice.Title);
         }
         catch(Exception error){MessageBox.Show(this,L10n.Text(error.Message),L10n.Text("Couldn’t open this tool"),MessageBoxButton.OK,MessageBoxImage.Information);}
-        finally{if(temporary is not null&&File.Exists(temporary))File.Delete(temporary);SetBusy(false);}
+        finally{if(temporary is not null&&File.Exists(temporary))File.Delete(temporary);if(ownsBusy)SetBusy(false);}
     }
     private async Task RunAsync(Func<string,IProgress<OperationProgress>,CancellationToken,Task<IReadOnlyList<string>>> work,string label="Fresh copy")
     {
