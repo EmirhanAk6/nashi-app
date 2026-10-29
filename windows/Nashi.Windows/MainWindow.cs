@@ -312,7 +312,7 @@ public sealed partial class MainWindow:Window
         {
             if(update is null){update=await PublicUpdates.CheckAsync(UpdateInstaller.Current);if(update is null){if(user)L10n.SetText(status,"You have the latest published Windows version.");return;}OfferUpdate(update);if(!user)return;}
             if(busy)return;
-            if(MessageBox.Show(this,L10n.Text("Download, verify and install Nashi "+update.Version+"? The app will restart. No account or token is needed."),L10n.Text("Nashi update"),MessageBoxButton.OKCancel)!=MessageBoxResult.OK)return;
+            if(MessageBox.Show(this,L10n.Text("Download, verify and install Nashi "+update.Version+"? The app will restart. No account or token is needed."),L10n.Text("Nashi update"),MessageBoxButton.OKCancel)!=MessageBoxResult.OK)return;if(OwnedWindows.OfType<ToolEditor>().FirstOrDefault() is {} editorOpen){if(editorOpen.WindowState==WindowState.Minimized)editorOpen.WindowState=WindowState.Normal;editorOpen.Activate();MessageBox.Show(editorOpen,L10n.Text("An editor is still open. Save or cancel it before closing Nashi."),"Nashi",MessageBoxButton.OK,MessageBoxImage.Information);return;}
             SetBusy(true);using var cancellation=new CancellationTokenSource();var toast=new ToastWindow(this,cancellation.Cancel);toast.Show();
             try{await UpdateInstaller.StageAsync(update,new Progress<OperationProgress>(toast.Update),cancellation.Token);busy=false;Application.Current.Shutdown();}finally{toast.Close();SetBusy(false);}
         }
