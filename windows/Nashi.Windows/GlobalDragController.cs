@@ -46,14 +46,22 @@ public sealed class GlobalDragController:IDisposable
     {
         UpdateShortcut();if(!preferences.Value.Enabled||!OwnerAvailable){wheel?.Close();wheel=null;down=false;opened=false;hint=null;ResetScroll();return;}var held=PrimaryMouseButton.IsPressed;GetCursorPos(out var point);
         if(!held){if(down){down=false;opened=false;hint=null;ResetScroll();if(wheel is {IsVisible:true}){var old=wheel;var dismiss=new System.Windows.Threading.DispatcherTimer{Interval=TimeSpan.FromMilliseconds(150)};dismiss.Tick+=(_,_)=>{dismiss.Stop();if(old.IsVisible)old.Close();};dismiss.Start();}wheel=null;}return;}
-        if(!down){down=true;start=point;opened=false;hint=null;return;}if(opened||Math.Abs(point.X-start.X)+Math.Abs(point.Y-start.Y)<10)return;
+        if(!down){down=true;start=point;opened=false;hint=null;return;}if(opened){SwitchByModifier(point);return;}if(Math.Abs(point.X-start.X)+Math.Abs(point.Y-start.Y)<10)return;
         hint??=Task.Run(()=>LinkAt(start));var chord=Chord();var p=preferences.Value;var kind=chord==p.ToolsModifier?"tools":chord==p.ConvertModifier?"convert":chord==p.ActionsModifier?"actions":null;if(kind is null)return;opened=true;if(InMoveSize())return;
         OpenWheel(kind,point);}
     private void OpenWheel(string kind,NativePoint point)
     {
         var p=preferences.Value;currentKind=kind;if(wheel is {Revealed:true})dragRevealed=true;wheel?.Close();var sourceHint=hint;wheel=new GlobalDropWheel(kind,p.WheelScale,(data,id)=>dropped(id,data,sourceHint?.IsCompletedSuccessfully==true?sourceHint.Result:null),()=>sourceHint?.IsCompletedSuccessfully==true?sourceHint.Result:null);wheel.Show();DesktopGeometry.PlaceWheel(wheel,point.X,point.Y,WheelPresentation.Diameter*p.WheelScale);
     }
-    private void ResetScroll(){currentKind=null;scrollAccumulator=0;dragRevealed=false;}
+    private void ResetScroll(){currentKind=null;scrollAccumulator=0;dragRevealed=false;lastChord="";}
+    private string lastChord="";
+    /// While a drag wheel is open, pressing a different configured modifier switches to that wheel.
+    private void SwitchByModifier(NativePoint point)
+    {
+        var chord=Chord();if(chord==lastChord)return;lastChord=chord;if(chord.Length==0||currentKind is null||InMoveSize())return;
+        var p=preferences.Value;var kind=chord==p.ToolsModifier?"tools":chord==p.ConvertModifier?"convert":chord==p.ActionsModifier?"actions":null;
+        if(kind is not null&&kind!=currentKind)OpenWheel(kind,point);
+    }
     /// Mouse wheel during a file drag cycles Tools -> Convert -> File actions without modifier keys.
     /// Only wheel events are acted on; the hook never reads keystrokes. A wheel event is consumed only after
     /// the drop wheel has verified a real file or link payload, so text selections and other drags keep scrolling.
