@@ -16,7 +16,7 @@ public sealed class GlobalDragController:IDisposable
 {
     [StructLayout(LayoutKind.Sequential)]internal struct NativePoint{public int X,Y;}
     [DllImport("user32.dll")]private static extern short GetAsyncKeyState(int key);
-    [DllImport("user32.dll")]private static extern bool GetCursorPos(out NativePoint point);
+    [DllImport("user32.dll")]private static extern bool GetCursorPos(out NativePoint point);[StructLayout(LayoutKind.Sequential)]private struct MouseHookData{public NativePoint Point;public uint MouseData,Flags,Time;public IntPtr Extra;}private delegate IntPtr MouseHookProc(int code,IntPtr message,IntPtr data);[DllImport("user32.dll",SetLastError=true)]private static extern IntPtr SetWindowsHookEx(int hook,MouseHookProc proc,IntPtr module,uint thread);[DllImport("user32.dll")]private static extern bool UnhookWindowsHookEx(IntPtr hook);[DllImport("user32.dll")]private static extern IntPtr CallNextHookEx(IntPtr hook,int code,IntPtr message,IntPtr data);[DllImport("kernel32.dll")]private static extern IntPtr GetModuleHandle(string? name);private static readonly string[] ScrollModes=["tools","convert","actions"];private MouseHookProc? mouseProc;private IntPtr mouseHook;private string? currentKind;private int scrollAccumulator;private bool dragRevealed;
     [DllImport("user32.dll")]private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")]private static extern bool RegisterHotKey(IntPtr window,int id,uint modifiers,uint key);
     [DllImport("user32.dll")]private static extern bool UnregisterHotKey(IntPtr window,int id);
@@ -35,7 +35,7 @@ public sealed class GlobalDragController:IDisposable
     public GlobalDragController(Window owner,PreferencesStore preferences,Action<string,IDataObject,string?> dropped,Action link)
     {
         this.owner=owner;this.preferences=preferences;this.dropped=dropped;this.link=link;timer=new(){Interval=TimeSpan.FromMilliseconds(40)};timer.Tick+=(_,_)=>Poll();
-        if(new WindowInteropHelper(owner).Handle!=IntPtr.Zero)Register();else owner.SourceInitialized+=(_,_)=>Register();timer.Start();
+        if(new WindowInteropHelper(owner).Handle!=IntPtr.Zero)Register();else owner.SourceInitialized+=(_,_)=>Register();timer.Start();mouseProc=MouseHook;mouseHook=SetWindowsHookEx(14,mouseProc,GetModuleHandle(null),0);
     }
     private void Register(){handle=new WindowInteropHelper(owner).Handle;source=HwndSource.FromHwnd(handle);source.AddHook(Hook);UpdateShortcut();}
     private void UpdateShortcut(){if(handle==IntPtr.Zero)return;var enabled=preferences.Value.Enabled;if(shortcutEnabled==enabled)return;shortcutEnabled=enabled;if(LinkShortcutRegistered)UnregisterHotKey(handle,7701);LinkShortcutRegistered=enabled&&RegisterHotKey(handle,7701,0x4000|0x2|0x4,0x44);}
@@ -44,11 +44,33 @@ public sealed class GlobalDragController:IDisposable
     private string Chord(){var parts=new List<string>();if(Held(0x11))parts.Add("Ctrl");if(Held(0x10))parts.Add("Shift");if(Held(0x12))parts.Add("Alt");return string.Join('+',parts);}
     private void Poll()
     {
-        UpdateShortcut();if(!preferences.Value.Enabled||!OwnerAvailable){wheel?.Close();wheel=null;down=false;opened=false;hint=null;return;}var held=PrimaryMouseButton.IsPressed;GetCursorPos(out var point);
-        if(!held){if(down){down=false;opened=false;hint=null;if(wheel is {IsVisible:true}){var old=wheel;var dismiss=new System.Windows.Threading.DispatcherTimer{Interval=TimeSpan.FromMilliseconds(150)};dismiss.Tick+=(_,_)=>{dismiss.Stop();if(old.IsVisible)old.Close();};dismiss.Start();}wheel=null;}return;}
+        UpdateShortcut();if(!preferences.Value.Enabled||!OwnerAvailable){wheel?.Close();wheel=null;down=false;opened=false;hint=null;ResetScroll();return;}var held=PrimaryMouseButton.IsPressed;GetCursorPos(out var point);
+        if(!held){if(down){down=false;opened=false;hint=null;ResetScroll();if(wheel is {IsVisible:true}){var old=wheel;var dismiss=new System.Windows.Threading.DispatcherTimer{Interval=TimeSpan.FromMilliseconds(150)};dismiss.Tick+=(_,_)=>{dismiss.Stop();if(old.IsVisible)old.Close();};dismiss.Start();}wheel=null;}return;}
         if(!down){down=true;start=point;opened=false;hint=null;return;}if(opened||Math.Abs(point.X-start.X)+Math.Abs(point.Y-start.Y)<10)return;
         hint??=Task.Run(()=>LinkAt(start));var chord=Chord();var p=preferences.Value;var kind=chord==p.ToolsModifier?"tools":chord==p.ConvertModifier?"convert":chord==p.ActionsModifier?"actions":null;if(kind is null)return;opened=true;if(InMoveSize())return;
-        var sourceHint=hint;wheel=new GlobalDropWheel(kind,p.WheelScale,(data,id)=>dropped(id,data,sourceHint?.IsCompletedSuccessfully==true?sourceHint.Result:null),()=>sourceHint?.IsCompletedSuccessfully==true?sourceHint.Result:null);wheel.Show();DesktopGeometry.PlaceWheel(wheel,point.X,point.Y,WheelPresentation.Diameter*p.WheelScale);
+        OpenWheel(kind,point);}
+    private void OpenWheel(string kind,NativePoint point)
+    {
+        var p=preferences.Value;currentKind=kind;if(wheel is {Revealed:true})dragRevealed=true;wheel?.Close();var sourceHint=hint;wheel=new GlobalDropWheel(kind,p.WheelScale,(data,id)=>dropped(id,data,sourceHint?.IsCompletedSuccessfully==true?sourceHint.Result:null),()=>sourceHint?.IsCompletedSuccessfully==true?sourceHint.Result:null);wheel.Show();DesktopGeometry.PlaceWheel(wheel,point.X,point.Y,WheelPresentation.Diameter*p.WheelScale);
+    }
+    private void ResetScroll(){currentKind=null;scrollAccumulator=0;dragRevealed=false;}
+    /// Mouse wheel during a file drag cycles Tools -> Convert -> File actions without modifier keys.
+    /// Only wheel events are acted on; the hook never reads keystrokes.
+    private IntPtr MouseHook(int code,IntPtr message,IntPtr data)
+    {
+        if(code>=0&&message.ToInt32()==0x020A&&down&&preferences.Value.Enabled&&OwnerAvailable&&(currentKind is null||dragRevealed||wheel is {Revealed:true}))
+        {
+            var info=Marshal.PtrToStructure<MouseHookData>(data);
+            if(Math.Abs(info.Point.X-start.X)+Math.Abs(info.Point.Y-start.Y)>=10&&PrimaryMouseButton.IsPressed&&!InMoveSize())
+            {var delta=(int)(short)(info.MouseData>>16);var point=info.Point;owner.Dispatcher.BeginInvoke(()=>ScrollWheel(delta,point));return (IntPtr)1;}
+        }
+        return CallNextHookEx(mouseHook,code,message,data);
+    }
+    private void ScrollWheel(int delta,NativePoint point)
+    {
+        if(!down)return;scrollAccumulator+=delta;if(Math.Abs(scrollAccumulator)<120)return;var step=scrollAccumulator<0?1:-1;scrollAccumulator=0;
+        var index=currentKind is null?(step>0?0:ScrollModes.Length-1):(Array.IndexOf(ScrollModes,currentKind)+step+ScrollModes.Length)%ScrollModes.Length;
+        opened=true;OpenWheel(ScrollModes[index],point);
     }
     private static string? LinkAt(NativePoint point)
     {
@@ -65,7 +87,7 @@ public sealed class GlobalDragController:IDisposable
             }
         }catch(ElementNotAvailableException){}catch(InvalidOperationException){}catch(COMException){}catch(System.Reflection.TargetInvocationException){}catch(MissingMethodException){}return null;
     }
-    public void Dispose(){timer.Stop();wheel?.Close();if(handle!=IntPtr.Zero)UnregisterHotKey(handle,7701);source?.RemoveHook(Hook);}
+    public void Dispose(){timer.Stop();if(mouseHook!=IntPtr.Zero){UnhookWindowsHookEx(mouseHook);mouseHook=IntPtr.Zero;}wheel?.Close();if(handle!=IntPtr.Zero)UnregisterHotKey(handle,7701);source?.RemoveHook(Hook);}
 }
 
 internal sealed class GlobalDropWheel:Window
