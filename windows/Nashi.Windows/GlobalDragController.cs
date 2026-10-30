@@ -71,7 +71,7 @@ public sealed class GlobalDragController:IDisposable
         {
             var info=Marshal.PtrToStructure<MouseHookData>(data);
             if(Math.Abs(info.Point.X-start.X)+Math.Abs(info.Point.Y-start.Y)>=10&&PrimaryMouseButton.IsPressed&&!InMoveSize())
-            {var verified=dragRevealed||wheel is {Revealed:true};if(verified||currentKind is null){var delta=(int)(short)(info.MouseData>>16);var point=info.Point;owner.Dispatcher.BeginInvoke(()=>ScrollWheel(delta,point));}if(verified)return (IntPtr)1;}
+            {var verified=dragRevealed||wheel is {Revealed:true};var scrollOpen=wheel is {IsClosed:false,IsVisible:true};if(verified||currentKind is null||scrollOpen){var delta=(int)(short)(info.MouseData>>16);var point=info.Point;owner.Dispatcher.BeginInvoke(()=>ScrollWheel(delta,point));}if(verified)return (IntPtr)1;}
         }
         return CallNextHookEx(mouseHook,code,message,data);
     }
