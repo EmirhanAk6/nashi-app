@@ -51,7 +51,7 @@ public sealed class GlobalDragController:IDisposable
         OpenWheel(kind,point);}
     private void OpenWheel(string kind,NativePoint point,bool byScroll=false)
     {
-        var p=preferences.Value;currentKind=kind;if(wheel is {Revealed:true})dragRevealed=true;if(wheel is {IsClosed:false})wheel.Close();var sourceHint=hint;wheel=new GlobalDropWheel(kind,p.WheelScale,(data,id)=>dropped(id,data,sourceHint?.IsCompletedSuccessfully==true?sourceHint.Result:null),()=>sourceHint?.IsCompletedSuccessfully==true?sourceHint.Result:null);wheel.ReleaseUnsupported=byScroll;wheel.Show();DesktopGeometry.PlaceWheel(wheel,point.X,point.Y,WheelPresentation.Diameter*p.WheelScale);
+        var p=preferences.Value;currentKind=kind;if(wheel is {Revealed:true})dragRevealed=true;if(wheel is {IsClosed:false})wheel.Close();var sourceHint=hint;wheel=new GlobalDropWheel(kind,p.WheelScale,(data,id)=>dropped(id,data,sourceHint?.IsCompletedSuccessfully==true?sourceHint.Result:null),()=>sourceHint?.IsCompletedSuccessfully==true?sourceHint.Result:null);wheel.ReleaseUnsupported=byScroll;wheel.HintPending=()=>sourceHint is {IsCompleted:false};wheel.Show();DesktopGeometry.PlaceWheel(wheel,point.X,point.Y,WheelPresentation.Diameter*p.WheelScale);
     }
     private void ResetScroll(){currentKind=null;scrollAccumulator=0;dragRevealed=false;lastChord="";}
     private string lastChord="";
@@ -79,7 +79,7 @@ public sealed class GlobalDragController:IDisposable
     {
         if(!down)return;scrollAccumulator+=delta;if(Math.Abs(scrollAccumulator)<120)return;var step=scrollAccumulator<0?1:-1;scrollAccumulator=0;
         var index=currentKind is null?(step>0?0:ScrollModes.Length-1):(Array.IndexOf(ScrollModes,currentKind)+step+ScrollModes.Length)%ScrollModes.Length;
-        opened=true;OpenWheel(ScrollModes[index],point,true);
+        hint??=Task.Run(()=>LinkAt(start));opened=true;OpenWheel(ScrollModes[index],point,true);
     }
     private static string? LinkAt(NativePoint point)
     {
@@ -110,8 +110,8 @@ internal sealed class GlobalDropWheel:Window
     internal bool Revealed{get;private set;}
     /// A wheel opened by the mouse wheel (no modifier) releases the drop when no mode can use the payload,
     /// so text and other unsupported OLE drags still reach the window underneath.
-    internal bool ReleaseUnsupported{get;set;}internal bool IsClosed{get;private set;}
-    private void ReleaseIfUnsupported(DragEventArgs e){if(!ReleaseUnsupported||choices.Count>0)return;var files=e.Data.GetData(DataFormats.FileDrop) as string[]??[];if(files.Length>0||Payload(e.Data) is not null)return;ReleaseUnsupported=false;e.Effects=DragDropEffects.None;Dispatcher.BeginInvoke(new Action(()=>{if(!IsClosed)Close();}));}
+    internal bool ReleaseUnsupported{get;set;}internal bool IsClosed{get;private set;}internal Func<bool>? HintPending{get;set;}
+    private void ReleaseIfUnsupported(DragEventArgs e){if(!ReleaseUnsupported||choices.Count>0)return;if(HintPending?.Invoke()==true)return;var files=e.Data.GetData(DataFormats.FileDrop) as string[]??[];if(files.Length>0||Payload(e.Data) is not null)return;ReleaseUnsupported=false;e.Effects=DragDropEffects.None;Dispatcher.BeginInvoke(new Action(()=>{if(!IsClosed)Close();}));}
     private void Reveal(){if(Revealed)return;Revealed=true;foreach(var label in canvas.Children.OfType<Border>())label.Visibility=Visibility.Visible;WheelPresentation.Animate(this,HiddenOpacity);if(Opacity<1&&!HasAnimatedProperties)Opacity=1;}
     private readonly string mode;private readonly Action<IDataObject,string> chosen;private readonly Func<string?> hint;private readonly Canvas canvas=new(){Width=540,Height=540,Background=Brushes.Transparent,AllowDrop=true};private string selection="";private IReadOnlyList<ToolChoice> choices=[];
     public GlobalDropWheel(string mode,double scale,Action<IDataObject,string> chosen,Func<string?> hint)
