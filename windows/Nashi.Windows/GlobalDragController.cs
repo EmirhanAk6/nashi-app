@@ -51,7 +51,7 @@ public sealed class GlobalDragController:IDisposable
         OpenWheel(kind,point);}
     private void OpenWheel(string kind,NativePoint point,bool byScroll=false)
     {
-        var p=preferences.Value;currentKind=kind;if(wheel is {Revealed:true})dragRevealed=true;if(wheel is {IsLoaded:true})wheel.Close();var sourceHint=hint;wheel=new GlobalDropWheel(kind,p.WheelScale,(data,id)=>dropped(id,data,sourceHint?.IsCompletedSuccessfully==true?sourceHint.Result:null),()=>sourceHint?.IsCompletedSuccessfully==true?sourceHint.Result:null);wheel.ReleaseUnsupported=byScroll;wheel.Show();DesktopGeometry.PlaceWheel(wheel,point.X,point.Y,WheelPresentation.Diameter*p.WheelScale);
+        var p=preferences.Value;currentKind=kind;if(wheel is {Revealed:true})dragRevealed=true;if(wheel is {IsClosed:false})wheel.Close();var sourceHint=hint;wheel=new GlobalDropWheel(kind,p.WheelScale,(data,id)=>dropped(id,data,sourceHint?.IsCompletedSuccessfully==true?sourceHint.Result:null),()=>sourceHint?.IsCompletedSuccessfully==true?sourceHint.Result:null);wheel.ReleaseUnsupported=byScroll;wheel.Show();DesktopGeometry.PlaceWheel(wheel,point.X,point.Y,WheelPresentation.Diameter*p.WheelScale);
     }
     private void ResetScroll(){currentKind=null;scrollAccumulator=0;dragRevealed=false;lastChord="";}
     private string lastChord="";
@@ -110,13 +110,13 @@ internal sealed class GlobalDropWheel:Window
     internal bool Revealed{get;private set;}
     /// A wheel opened by the mouse wheel (no modifier) releases the drop when no mode can use the payload,
     /// so text and other unsupported OLE drags still reach the window underneath.
-    internal bool ReleaseUnsupported{get;set;}
-    private void ReleaseIfUnsupported(DragEventArgs e){if(!ReleaseUnsupported||choices.Count>0)return;var files=e.Data.GetData(DataFormats.FileDrop) as string[]??[];if(files.Length>0||Payload(e.Data) is not null)return;ReleaseUnsupported=false;e.Effects=DragDropEffects.None;Dispatcher.BeginInvoke(new Action(Close));}
+    internal bool ReleaseUnsupported{get;set;}internal bool IsClosed{get;private set;}
+    private void ReleaseIfUnsupported(DragEventArgs e){if(!ReleaseUnsupported||choices.Count>0)return;var files=e.Data.GetData(DataFormats.FileDrop) as string[]??[];if(files.Length>0||Payload(e.Data) is not null)return;ReleaseUnsupported=false;e.Effects=DragDropEffects.None;Dispatcher.BeginInvoke(new Action(()=>{if(!IsClosed)Close();}));}
     private void Reveal(){if(Revealed)return;Revealed=true;foreach(var label in canvas.Children.OfType<Border>())label.Visibility=Visibility.Visible;WheelPresentation.Animate(this,HiddenOpacity);if(Opacity<1&&!HasAnimatedProperties)Opacity=1;}
     private readonly string mode;private readonly Action<IDataObject,string> chosen;private readonly Func<string?> hint;private readonly Canvas canvas=new(){Width=540,Height=540,Background=Brushes.Transparent,AllowDrop=true};private string selection="";private IReadOnlyList<ToolChoice> choices=[];
     public GlobalDropWheel(string mode,double scale,Action<IDataObject,string> chosen,Func<string?> hint)
     {
-        this.mode=mode;this.chosen=chosen;this.hint=hint;Title="Nashi · "+mode;Width=Height=WheelPresentation.Diameter*scale;WindowStyle=WindowStyle.None;AllowsTransparency=true;Background=Brushes.Transparent;ResizeMode=ResizeMode.NoResize;ShowInTaskbar=false;ShowActivated=false;Topmost=true;AllowDrop=true;Content=new Viewbox{Child=canvas};Build([]);Opacity=HiddenOpacity;
+        this.mode=mode;this.chosen=chosen;this.hint=hint;Title="Nashi · "+mode;Width=Height=WheelPresentation.Diameter*scale;WindowStyle=WindowStyle.None;AllowsTransparency=true;Background=Brushes.Transparent;ResizeMode=ResizeMode.NoResize;ShowInTaskbar=false;ShowActivated=false;Topmost=true;AllowDrop=true;Content=new Viewbox{Child=canvas};Build([]);Opacity=HiddenOpacity;Closed+=(_,_)=>IsClosed=true;
         // Reveal only once the payload offers choices. On entry the pointer sits in the center,
         // so e.Effects is still None even for a valid file drag.
         DragEnter+=(_,e)=>{entered++;Track(e);if(choices.Count>0)Reveal();ReleaseIfUnsupported(e);};
